@@ -16,11 +16,22 @@
 
 void update_stock(int fd, int cod, int n_stock);
 void update_vendas(int fd_a, int fd_v, char* cv_mailbox, int cod, int qtd);
+int agregacao(int curr_index, int curr_vendas, int curr_agreg, int fd_vendas);
 ssize_t readln(int fd, void* buf, size_t nbyte);
 
 int main(){
-     int fd_mailbox, n_read, curr_index = -1, curr_vendas = 0, curr_agreg = 0; 
+     int fd_mailbox, n_read, curr_index = 0, curr_vendas = 0, curr_agreg = 0; 
      char buff[128], message[256], *token;
+
+     struct stat st = {0};
+
+     if (stat("./logs", &st) == -1) {
+          mkdir("./logs", 0700);
+     }
+
+     if (stat("./aggregation", &st) == -1) {
+          mkdir("./aggregation", 0700);
+     }
 
      int fd_artigos = open("logs/ARTIGOS", O_CREAT | O_RDONLY, 0666);
      int fd_stocks = open("logs/STOCKS", O_CREAT | O_RDWR, 0666);
@@ -46,10 +57,6 @@ int main(){
                int codigo;
                double preco;
                char *ptr;
-               pid_t son;
-               int pipe_IN[2], pipe_OUT[2];
-               char agreg[32];
-               char index[10];
           
                token = strtok(NULL," ");
                switch(token[0]){
@@ -67,57 +74,7 @@ int main(){
                          break;
 
                     case 'a':
-
-                         if(curr_vendas == 0){
-                              sprintf(message,"Sem vendas para agregar!\n"); 
-                              write(1,message,strlen(message));
-                              break;
-                         }
-
-                         pipe(pipe_IN);
-                         pipe(pipe_OUT);
-
-                         if((son = fork()) == 0){
-                              // Fazer os pipes parte do stdin e do stdout
-                              dup2(SON_READ,0);
-                              dup2(SON_WRITE,1);
-                              close(SON_READ);
-                              close(SON_WRITE);
-                              close(FATHER_READ);
-                              close(FATHER_WRITE);
-
-                              char index[10];
-                              sprintf(index,"%d",curr_index);
-
-                              // Executar o agregador 
-                              char* param[] = {"./ag"};
-                              execlp("./ag","./ag",index,(char *) NULL);
-                              exit(1);
-                         }
-
-                         close(SON_READ);
-                         close(SON_WRITE);
-
-                         lseek(fd_vendas,curr_agreg*32,SEEK_SET);
-                         while(read(fd_vendas,agreg,32) > 0){
-                              write(FATHER_WRITE,agreg,32);
-                              curr_agreg++;
-                         }
-
-                         close(FATHER_WRITE);
-
-                         time_t t = time(NULL);
-                         struct tm *timeinfo = localtime(&t);
-                         char file_agreg[64];
-                         strftime(file_agreg,64,"./%Y-%m-%dT%X",timeinfo);
-                         int fd_agreg = open(file_agreg,O_CREAT | O_WRONLY | O_APPEND,0666);
-                         
-                         while((n_read = read(FATHER_READ,agreg,32)) > 0){
-                              write(fd_agreg,agreg,32);
-                         }   
-
-                         close(FATHER_READ);
-                         close(fd_agreg);
+                         curr_agreg = agregacao(curr_index,curr_vendas,curr_agreg,fd_vendas);
                          break;
 
                     //case 'r':
@@ -227,4 +184,64 @@ ssize_t readln(int fd, void* buf, size_t nbyte){
     while(n<nbyte && (r=read(fd, p+n, 1))==1 && p[n] != '\n')
          n++;
     return r ==-1 ? -1 : (p != 0 && p[n] == '\n' ? n+1 : n);
+}
+
+int agregacao(int curr_index, int curr_vendas, int curr_agreg, int fd_vendas){
+     pid_t son;
+     int pipe_IN[2], pipe_OUT[2], n_read = 0;
+     char agreg[32];
+     char index[10];
+     char message[64];
+     
+     if(curr_vendas == 0){
+          sprintf(message,"Sem vendas para agregar!\n"); 
+          write(1,message,strlen(message));
+          exit(1);
+     }
+
+     pipe(pipe_IN);
+     pipe(pipe_OUT);
+
+     if((son = fork()) == 0){
+          // Fazer os pipes parte do stdin e do stdout
+          dup2(SON_READ,0);
+          dup2(SON_WRITE,1);
+          close(SON_READ);
+          close(SON_WRITE);
+          close(FATHER_READ);
+          close(FATHER_WRITE);
+          
+          sprintf(index,"%d",curr_index);
+          // Executar o agregador 
+          execlp("./ag","./ag",index,(char *) NULL);
+          exit(1);
+     }
+     
+     close(SON_READ);
+     close(SON_WRITE);
+     
+     lseek(fd_vendas,curr_agreg*32,SEEK_SET);
+     
+     while(read(fd_vendas,agreg,32) > 0){
+          write(FATHER_WRITE,agreg,32);
+          curr_agreg++;
+     }
+     
+     close(FATHER_WRITE);
+     time_t t = time(NULL);
+     
+     struct tm *timeinfo = localtime(&t);
+     char file_agreg[128];
+     strftime(file_agreg,128,"./aggregation/%Y-%m-%dT%X",timeinfo);
+     
+     int fd_agreg = open(file_agreg, O_CREAT | O_WRONLY | O_APPEND,0666);
+     
+     while((n_read = read(FATHER_READ,agreg,32)) > 0){
+          write(fd_agreg,agreg,32);
+     }   
+
+     close(FATHER_READ);
+     close(fd_agreg);
+
+     return curr_agreg;
 }
