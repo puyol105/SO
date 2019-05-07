@@ -7,35 +7,43 @@
 #include <fcntl.h>
 #include <signal.h>
 
-void response_handler(int signum){
-     char r_pid[10];
-     char response[100];
-     sprintf(r_pid,"%d",getpid());
-
-     int fd_pid = open(r_pid, O_RDWR, 0666);
-     int r = read(fd_pid,response,100);
-     write(1,response,r);
-     close(fd_pid);
-}
+ssize_t readln(int fd, void* buf, size_t nbyte);
 
 int main(){
-     int fdCV, pret, n_read, mypid;
-     char request[256];
-     char mailbox[10], buff[128];
-     int r;
+     int fd_sv, fd_mailbox, n_read;
+     char mailbox[10], buff[128], request[256];
+     fd_sv = open("SV", O_WRONLY);
 
-     mkfifo("CV", 0666);
-     fdCV = open("CV", O_RDWR | O_APPEND);
-     mypid = getpid();
-     sprintf(mailbox,"%d",mypid);
+     sprintf(mailbox,"%d",getpid());
      mkfifo(mailbox, 0666);
 
-     signal(SIGUSR1,response_handler);
-     while((n_read = read(0,buff,128)) > 0){
-          sprintf(request,"%d %s",mypid,buff);
-          write(fdCV,request,strlen(request));
+     pid_t pid;
+
+     if((pid = fork()) == 0){
+          fd_mailbox = open(mailbox,O_RDONLY);
+
+          while((n_read = read(fd_mailbox,buff,256)) >= 0){
+               write(1,buff,n_read);
+          }     
+
+          _exit(0);
      }
+               
+
+     while((n_read = read(0,buff,128)) > 0){
+          buff[n_read - 1] = '\0';
+          sprintf(request,"CV %d %s\n",getpid(),buff);
+          write(fd_sv,request,strlen(request));
+     }   
      
-     close(fdCV);
-     return 0;
+     kill(pid,SIGKILL);
+     execlp("rm","rm",mailbox,NULL);
+}
+
+ssize_t readln(int fd, void* buf, size_t nbyte){
+    int n = 0, r;
+    char* p = (char*)buf;
+    while(n<nbyte && (r=read(fd, p+n, 1))==1 && p[n] != '\n')
+         n++;
+    return r ==-1 ? -1 : (p != 0 && p[n] == '\n' ? n+1 : n);
 }
