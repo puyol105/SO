@@ -29,8 +29,7 @@ int main(){
           _exit(0);
      }
                
-
-     while((n_read = read(0,buff,128)) > 0){
+     while((n_read = readln(0,buff,128)) > 0){
           buff[n_read - 1] = '\0';
           sprintf(request,"CV %d %s\n",getpid(),buff);
           write(fd_sv,request,strlen(request));

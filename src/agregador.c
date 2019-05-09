@@ -24,7 +24,6 @@ int main(int argc, char**argv){
         sprintf(agregacoes[i],"NULL");
     }
 
-
     while(n_read = read(0,venda,32) > 0){
         aux = strdup(venda);
 

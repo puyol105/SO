@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -17,11 +18,13 @@
 void update_stock(int fd, int cod, int n_stock);
 void update_vendas(int fd_a, int fd_v, char* cv_mailbox, int cod, int qtd);
 int agregacao(int curr_index, int curr_vendas, int curr_agreg, int fd_vendas);
-ssize_t readln(int fd, void* buf, size_t nbyte);
+void agregacao_by_N(int curr_index, int curr_vendas, int curr_agreg, int fd_vendas, int n_agregadores);
+bool is_number(const char *str);
+ssize_t readln(int fd, char* buf);
 
 int main(){
      int fd_mailbox, n_read, curr_index = 0, curr_vendas = 0, curr_agreg = 0; 
-     char buff[128], message[256], *token;
+     char buff[128], message[256], *token, *aux;
 
      struct stat st = {0};
 
@@ -48,17 +51,24 @@ int main(){
      mkfifo("SV", 0666);
      int fd_sv = open("SV", O_RDONLY);
 
-     while((n_read = readln(fd_sv,buff,128)) >= 0){
+     while((n_read = readln(fd_sv,buff)) >= 0){
+          int space = 0;
           buff[n_read -1] = '\0';
+          
+          for(int j = 0;j<strlen(buff);j++){
+               if (buff[j] == ' ') space++;
+          }
+     
           token = strtok(buff," ");
      
           // Tratamento de mensagens provenientes da "Manutenção de Artigos"
           if(strcmp(token,"MA") == 0){
-               int codigo;
+               int codigo, n;
                double preco;
                char *ptr;
-          
+
                token = strtok(NULL," ");
+
                switch(token[0]){
                     case 'i':
                          update_stock(fd_stocks, curr_index, 0);
@@ -74,9 +84,16 @@ int main(){
                          break;
 
                     case 'a':
-                         curr_agreg = agregacao(curr_index,curr_vendas,curr_agreg,fd_vendas);
-                         break;
 
+                         if(space > 1){
+                              token = strtok(NULL," ");
+                              n = atoi(token);
+                              agregacao_by_N(curr_index,curr_vendas,curr_agreg,fd_vendas,n);
+                         }else{
+                              curr_agreg = agregacao(curr_index,curr_vendas,curr_agreg,fd_vendas);
+                         }
+                         break;
+                         
                     //case 'r':
                     //   curr_index--;
                     //   verificar se este estava na cache
@@ -178,25 +195,97 @@ void update_vendas(int fd_a, int fd_v, char* cv_mailbox, int cod, int qtd){
      write(fd_v,venda,sizeof(venda));
 }
 
-ssize_t readln(int fd, void* buf, size_t nbyte){
-    int n = 0, r;
-    char* p = (char*)buf;
-    while(n<nbyte && (r=read(fd, p+n, 1))==1 && p[n] != '\n')
-         n++;
-    return r ==-1 ? -1 : (p != 0 && p[n] == '\n' ? n+1 : n);
+ssize_t readln(int fildes, char* buf){
+    ssize_t total_char = 0, r;
+
+    while((r = read(fildes, buf + total_char, 1)) > 0){
+        if(buf[total_char++] == '\n') break;
+    }
+
+    return total_char;
+}
+
+void agregacao_by_N(int curr_index, int curr_vendas, int curr_agreg, int fd_vendas, int n_agregadores){
+     pid_t son;
+     int n_read = 0, i;
+     char agreg[32], index[10], message[64];
+
+     int pipe_OUT[n_agregadores][2];
+     int pipe_IN[n_agregadores][2];
+
+     int n_agregacoes = (curr_vendas - curr_agreg) / n_agregadores;
+
+     if(curr_vendas == 0){
+          sprintf(message,"Sem vendas para agregar!\n"); 
+          write(1,message,strlen(message));
+          exit(0);
+     }
+
+     for(i = 0;i < n_agregadores;i++){
+
+          pipe(pipe_OUT[i]);
+          pipe(pipe_IN[i]);
+
+          if((son = fork()) == 0){
+               // Redirecionamento de pipes para stdin e stdout
+               dup2(pipe_OUT[i][0],0);
+               dup2(pipe_IN[i][1],1);
+               close(pipe_OUT[i][0]);
+               close(pipe_IN[i][1]);
+               close(pipe_IN[i][0]);
+               close(pipe_OUT[i][1]);
+
+               sprintf(index,"%d",curr_index);
+               // Executar o agregador 
+               execlp("./ag","./ag",index,(char *) NULL);
+               exit(1);
+          }
+     }
+     
+     lseek(fd_vendas,curr_agreg*32,SEEK_SET);
+     
+     for(i = 0;i < n_agregadores;i++){
+
+          if(i == n_agregadores-1){
+               while((n_read = read(fd_vendas,agreg,32)) > 0){
+                    write(pipe_OUT[i][1],agreg,32);
+                    curr_agreg++;
+               }
+          }else{
+               for(int j=0;j < n_agregacoes;j++){
+                    read(fd_vendas,agreg,32);
+                    write(pipe_OUT[i][1],agreg,32);
+                    curr_agreg++;
+               }
+          }
+
+          close(pipe_OUT[i][0]);
+          close(pipe_IN[i][1]);
+          close(pipe_OUT[i][1]);    
+     }
+
+     int fd_temp = open("./aggregation/temp", O_CREAT | O_RDWR | O_TRUNC, 0666);
+
+     for(i = 0;i<n_agregadores;i++){
+          
+          while((n_read = read(pipe_IN[i][0],agreg,32)) > 0){
+               write(fd_temp,agreg,32);
+          }
+          
+          close(pipe_IN[i][0]);
+     }
+
+     close(fd_temp);
 }
 
 int agregacao(int curr_index, int curr_vendas, int curr_agreg, int fd_vendas){
      pid_t son;
      int pipe_IN[2], pipe_OUT[2], n_read = 0;
-     char agreg[32];
-     char index[10];
-     char message[64];
+     char agreg[32], index[10], message[64];
      
      if(curr_vendas == 0){
           sprintf(message,"Sem vendas para agregar!\n"); 
           write(1,message,strlen(message));
-          exit(1);
      }
 
      pipe(pipe_IN);
@@ -244,4 +333,29 @@ int agregacao(int curr_index, int curr_vendas, int curr_agreg, int fd_vendas){
      close(fd_agreg);
 
      return curr_agreg;
+}
+
+bool is_number(const char *str){
+     int decimal_separator = 0;
+
+     if(str == NULL || *str == '\0'){ return false; }
+     
+     while(*str){
+          char c = *str;
+
+          switch(c){
+          
+          case '.':
+               decimal_separator++;
+               if(decimal_separator > 1) return false;
+               break;
+          
+          default:
+               if(c < '0' || c > '9') { return false; }
+          
+          }
+          str++;
+     }    
+
+     return true;
 }

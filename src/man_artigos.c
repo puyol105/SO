@@ -13,7 +13,7 @@ void change_price(int fd_a, int index, double preco);
 void change_name(int fd_a, int fd_s, int index, int ref, char* nome);
 bool check_artigo(int fd_s, char* nome);
 bool is_number(const char *str);
-ssize_t readln(int fd, void* buf, size_t nbyte);
+ssize_t readln(int fd, char* buf);
 
 //ARTIGO
 
@@ -21,27 +21,26 @@ ssize_t readln(int fd, void* buf, size_t nbyte);
 //|_ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _|_ _ _ _ _ _ _ _|
 
 int main(){
-     int fd_artigos, fd_strings, fd_sv, n_read, curr_index = 0, curr_ref = 0, codigo;
+     int fd_artigos, fd_strings, fd_sv, n_read, curr_index = 0, curr_ref = 0, codigo, n;
      double preco;
      char buff[1024], command[64], artigo[32], string[128], message[32];
-     char *token, *nome;
+     char *token, *nome, *aux;
 
      fd_artigos = open("logs/ARTIGOS", O_CREAT | O_RDWR , 0666);
      fd_strings = open("logs/STRINGS", O_CREAT | O_RDWR | O_APPEND, 0666);
      fd_sv = open("SV", O_WRONLY | O_APPEND , 0666);
           
-     while((n_read = readln(fd_artigos,buff,32)) > 0){
+     while((n_read = readln(fd_artigos,buff)) > 0){
           curr_index++;
      }
 
-     while((n_read = readln(fd_strings,buff,128)) > 0){
+     while((n_read = readln(fd_strings,buff)) > 0){
           curr_ref++;
      }
 
-
-     while((n_read = readln(0,command,64)) > 0){
+     while((n_read = readln(0,command)) > 0){
           command[n_read-1] = '\0';
-          //preco = strdup(strrchr(command,' ')+1);
+          aux = strdup(command);
           token = strtok(command," ");
 
           if(strcmp(token,"i") == 0){
@@ -95,8 +94,21 @@ int main(){
                     write(fd_sv,message,strlen(message));
      
           }else if(strcmp(token,"a") == 0){
-                    sprintf(message,"MA a\n");
-                    write(fd_sv,message,strlen(message));
+               
+               int space = 0;
+               for(int j = 0;j<strlen(aux);j++){
+                    if (aux[j] == ' ') space++;
+               }
+
+               if(space > 0){
+                         token = strtok(NULL," ");
+                         n = atoi(token);
+                         sprintf(message,"MA a %d\n",n);
+                         write(fd_sv,message,strlen(message));
+               }else{
+                         sprintf(message,"MA a\n");
+                         write(fd_sv,message,strlen(message));
+               }
           }else{
                write(1,"Comando Inválido\n",19);
           }
@@ -106,7 +118,6 @@ int main(){
      close(fd_strings);
      close(fd_sv);
      return 0;
-
 }
 
 void insere_artigo(int fd_a,int fd_s,int index, int ref, char *nome, double preco){
@@ -171,7 +182,7 @@ bool check_artigo(int fd_s, char* nome){
      int n_read = 0;
      
      lseek(fd_s,0,SEEK_SET);
-     while((n_read = readln(fd_s,buff,512)) > 0){
+     while((n_read = readln(fd_s,buff)) > 0){
           buff[n_read -1] = '\0';
           if(strcmp(buff,nome) == 0) { return false; }
      }
@@ -204,10 +215,12 @@ bool is_number(const char *str){
      return true;
 }
 
-ssize_t readln(int fd, void* buf, size_t nbyte){
-    int n = 0, r;
-    char* p = (char*)buf;
-    while(n<nbyte && (r=read(fd, p+n, 1))==1 && p[n] != '\n')
-         n++;
-    return r ==-1 ? -1 : (p != 0 && p[n] == '\n' ? n+1 : n);
+ssize_t readln(int fildes, char* buf){
+    ssize_t total_char = 0, r;
+
+    while((r = read(fildes, buf + total_char, 1)) > 0){
+        if(buf[total_char++] == '\n') break;
+    }
+
+    return total_char;
 }
