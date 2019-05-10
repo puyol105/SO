@@ -7,12 +7,13 @@
 #include <fcntl.h>
 #include <signal.h>
 
-ssize_t readln(int fd, void* buf, size_t nbyte);
+ssize_t readln(int fd, char* buf);
 
 int main(){
      int fd_sv, fd_mailbox, n_read;
      char mailbox[10], buff[128], request[256];
      fd_sv = open("SV", O_WRONLY);
+     int p = getpid();
 
      sprintf(mailbox,"%d",getpid());
      mkfifo(mailbox, 0666);
@@ -26,23 +27,27 @@ int main(){
                write(1,buff,n_read);
           }     
 
+          close(fd_mailbox);  
           _exit(0);
      }
                
-     while((n_read = readln(0,buff,128)) > 0){
+     while((n_read = readln(0,buff)) > 0){
           buff[n_read - 1] = '\0';
-          sprintf(request,"CV %d %s\n",getpid(),buff);
+          sprintf(request,"CV %d %s\n",p,buff);
           write(fd_sv,request,strlen(request));
      }   
      
      kill(pid,SIGKILL);
+     close(fd_sv);
      execlp("rm","rm",mailbox,NULL);
 }
 
-ssize_t readln(int fd, void* buf, size_t nbyte){
-    int n = 0, r;
-    char* p = (char*)buf;
-    while(n<nbyte && (r=read(fd, p+n, 1))==1 && p[n] != '\n')
-         n++;
-    return r ==-1 ? -1 : (p != 0 && p[n] == '\n' ? n+1 : n);
+ssize_t readln(int fildes, char* buf){
+    ssize_t total_char = 0, r;
+
+    while((r = read(fildes, buf + total_char, 1)) > 0){
+        if(buf[total_char++] == '\n') break;
+    }
+
+    return total_char;
 }

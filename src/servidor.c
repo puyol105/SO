@@ -132,17 +132,20 @@ int main(){
                               // Entrada de Stock
                               n_stock += venda;
                               update_stock(fd_stocks, codigo, n_stock);
-                              sprintf(message,"Entrada em Stock efetuada com sucesso!\n\n");
+                              //sprintf(message,"Entrada em Stock efetuada com sucesso!\n\n");
                          }
                          if((venda < 0) && ((-venda) <= n_stock)){
                               // Venda de Artigo
                               update_stock(fd_stocks, codigo, n_stock + venda);
                               update_vendas(fd_artigos, fd_vendas, cv_mailbox, codigo, -venda);   
-                              sprintf(message,"Venda efetuada com sucesso!\n\n");
+                              //sprintf(message,"Venda efetuada com sucesso!\n\n");
                          }
                          if((venda < 0) && ((-venda) > n_stock)){
                               // Impossibilidade de venda
                               sprintf(message,"Impossível efetuar venda, limitado ao stock existente!\n\n");
+                              fd_mailbox = open(cv_mailbox, O_WRONLY);
+                              write(fd_mailbox,message,strlen(message));
+                              close(fd_mailbox);
                          }
                     }else{
                          // Pedido de informação de Artigo (Código, Preço, e Stock)
@@ -151,13 +154,15 @@ int main(){
                          read(fd_artigos,artigo,32);
                          preco = strrchr(artigo,' ') + 1;
                          sprintf(message,"Artigo: %d\nPreço: %s\nStock: %s\n\n",codigo,preco,stock);
+                         fd_mailbox = open(cv_mailbox, O_WRONLY);
+                         write(fd_mailbox,message,strlen(message));
+                         close(fd_mailbox);
                     }
 
                }
                
-               fd_mailbox = open(cv_mailbox, O_WRONLY);
-               write(fd_mailbox,message,strlen(message));
-               close(fd_mailbox);
+               
+               
           }    
      }
 
@@ -165,7 +170,8 @@ int main(){
      close(fd_stocks);
      close(fd_vendas);
      close(fd_sv);
-     
+
+     execlp("rm","rm","SV",NULL);     
      return 0;
 }
 
